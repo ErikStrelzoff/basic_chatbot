@@ -1,14 +1,11 @@
+import os
 import streamlit as st
-from openai import OpenAI
+import subprocess
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+from autogen import ConversableAgent, UserProxyAgent, config_list_from_json
 
+# Ensure the OpenAI API key is set as an environment variable
+#os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"  # Replace with your API key
 # Ask user for their OpenAI API key via `st.text_input`.
 # Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
 # via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
@@ -16,41 +13,39 @@ openai_api_key = st.text_input("OpenAI API Key", type="password")
 if not openai_api_key:
     st.info("Please add your OpenAI API key to continue.", icon="🗝️")
 else:
+    # Initialize the agent configuration
+    llm_config = {
+        "config_list": [{"model": "gpt-4", "api_key": openai_api_key}]
+    }
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+    # Create the Conversable Agent and User Proxy Agent
+    assistant = ConversableAgent("agent", llm_config=llm_config)
+    user_proxy = UserProxyAgent("user", code_execution_config=False)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Streamlit interface
+    st.title("Autogen Interactive Chat")
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Initialize chat history in session state
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+    # User input
+    user_input = st.text_input("You:", "")
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Process user input and get agent's response
+    if user_input:
+        # Add user input to chat history
+        st.session_state.chat_history.append(("You", user_input))
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+        # Generate response from assistant
+        assistant_response = assistant.initiate_chat(user_proxy, message=user_input)
+        
+        # Add assistant's response to chat history
+        st.session_state.chat_history.append(("Agent", assistant_response))
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    # Display chat history
+    for speaker, message in st.session_state.chat_history:
+        if speaker == "You":
+            st.write(f"**You:** {message}")
+        else:
+            st.write(f"**Agent:** {message}")
